@@ -5,6 +5,20 @@ import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_database/firebase_database.dart';
 
+class BusStop {
+  final String id;
+  final LatLng position;
+  final String name;
+  bool passed;
+
+  BusStop({
+    required this.id,
+    required this.position,
+    required this.name,
+    this.passed = false,
+  });
+}
+
 class LocationDriverSantoAntonio extends StatefulWidget {
   const LocationDriverSantoAntonio({super.key});
 
@@ -16,10 +30,11 @@ class LocationDriverSantoAntonio extends StatefulWidget {
 class _LocationDriverSantoAntonioState
     extends State<LocationDriverSantoAntonio> {
   bool _showMap = false;
-  LatLng _currentPosition = LatLng(-8.3356, -36.4243);// Posição inicial (UABJ - UFRPE)
+  LatLng _currentPosition = LatLng(-8.343481692464032, -36.42004505717594);
   final MapController _mapController = MapController();
   StreamSubscription<Position>? _positionStream;
   List<LatLng> _routePoints = [];
+  List<BusStop> _busStops = [];
 
   final DatabaseReference _rotaRef =
       FirebaseDatabase.instance.ref('onibus/santo_antonio/rota');
@@ -27,6 +42,47 @@ class _LocationDriverSantoAntonioState
       FirebaseDatabase.instance.ref('onibus/santo_antonio/localizacao_atual');
 
   DateTime? _lastSent;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBusStops();
+  }
+
+  void _loadBusStops() {
+    _busStops = [
+      BusStop(id: 's1', name: 'Erem João Monteiro', position: LatLng(-8.339067752350099, -36.43255993416365)),
+      BusStop(id: 's2', name: 'Posto Petrovia', position: LatLng(-8.337454040898562, -36.43059339723894)),
+      BusStop(id: 's3', name: 'Bradesco', position: LatLng(-8.337935253551777, -36.425932851649314)),
+      BusStop(id: 's4', name: 'Fórum', position: LatLng(-8.33711239401202, -36.41898671794646)),
+      BusStop(id: 's5', name: 'Santa Fé', position: LatLng(-8.331888692413065, -36.41357140284076)),
+      BusStop(id: 's6', name: 'UABJ', position: LatLng(-8.326865277108523, -36.40530664721273)),
+      BusStop(id: 's7', name: 'AEB', position: LatLng(-8.320094221176046, -36.39561876255546)),
+    ];
+
+    if (_busStops.isNotEmpty) {
+      _currentPosition = _busStops.first.position;
+    }
+  }
+
+  void _checkBusStops(LatLng busPosition) {
+    const double proximityThresholdMeters = 150.0;
+    for (var stop in _busStops) {
+      if (!stop.passed) {
+        double distance = Geolocator.distanceBetween(
+          busPosition.latitude,
+          busPosition.longitude,
+          stop.position.latitude,
+          stop.position.longitude,
+        );
+        if (distance <= proximityThresholdMeters) {
+          setState(() {
+            stop.passed = true;
+          });
+        }
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -44,17 +100,23 @@ class _LocationDriverSantoAntonioState
       return;
     }
 
+    Position pos = await Geolocator.getCurrentPosition();
+
     setState(() {
       _showMap = true;
+      _currentPosition = LatLng(pos.latitude, pos.longitude);
     });
 
-    Position pos = await Geolocator.getCurrentPosition();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _mapController.move(_currentPosition, 17);
+    });
+
     _updateLocation(pos);
 
     _positionStream = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high, 
-        distanceFilter: 10, 
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 0,
       ),
     ).listen((Position pos) {
       _updateLocation(pos);
@@ -63,7 +125,6 @@ class _LocationDriverSantoAntonioState
 
   Future<void> _updateLocation(Position pos) async {
     LatLng newPos = LatLng(pos.latitude, pos.longitude);
-
     setState(() {
       _currentPosition = newPos;
       _routePoints.add(newPos);
@@ -72,6 +133,7 @@ class _LocationDriverSantoAntonioState
       }
     });
 
+    _checkBusStops(newPos);
     _mapController.move(newPos, 17);
 
     await _atualRef.set({
@@ -93,15 +155,15 @@ class _LocationDriverSantoAntonioState
 
   Future<void> _finishRoute() async {
     await _positionStream?.cancel();
-
     await _rotaRef.remove();
     await _atualRef.remove();
-
     setState(() {
       _showMap = false;
       _routePoints.clear();
+      for (var stop in _busStops) {
+        stop.passed = false;
+      }
     });
-
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -148,9 +210,8 @@ class _LocationDriverSantoAntonioState
                   TileLayer(
                     urlTemplate:
                         "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-                    subdomains: const ['a', 'b', 'c'],
+                    userAgentPackageName: 'com.example.mobus',
                   ),
-
                   if (_routePoints.isNotEmpty)
                     PolylineLayer(
                       polylines: [
@@ -158,10 +219,9 @@ class _LocationDriverSantoAntonioState
                           points: _routePoints,
                           strokeWidth: 5.0,
                           color: Colors.blueAccent,
-                      ),
-                    ],
-                  ),
-                  
+                        ),
+                      ],
+                    ),
                   MarkerLayer(
                     markers: [
                       Marker(
@@ -170,10 +230,26 @@ class _LocationDriverSantoAntonioState
                         height: 80,
                         child: const Icon(
                           Icons.directions_bus,
-                          color: Colors.red,
+                          color: Colors.blueAccent,
                           size: 40,
                         ),
                       ),
+                      ..._busStops.map((stop) {
+                        final color = stop.passed ? Colors.grey : Colors.red;
+                        return Marker(
+                          point: stop.position,
+                          width: 40,
+                          height: 40,
+                          child: Tooltip(
+                            message: stop.name,
+                            child: Icon(
+                              Icons.directions_bus_filled_outlined,
+                              color: color,
+                              size: 30,
+                            ),
+                          ),
+                        );
+                      }).toList(),
                     ],
                   ),
                 ],
@@ -232,7 +308,6 @@ class _LocationDriverSantoAntonioState
                 ),
               ),
       ),
-
       floatingActionButton: _showMap
           ? FloatingActionButton.extended(
               onPressed: _finishRoute,
