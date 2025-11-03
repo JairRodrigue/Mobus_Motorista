@@ -53,9 +53,10 @@ class _LocationDriverCohabState extends State<LocationDriverCohab> {
       BusStop(id: 'p2', name: 'Praça das crianças', position: LatLng(-8.343889377713843, -36.413837818197614)),
       BusStop(id: 'p3', name: 'Sebastião Cabral', position: LatLng(-8.34210767354571, -36.41681422352121)),
       BusStop(id: 'p4', name: 'Fórum', position: LatLng(-8.33711239401202, -36.41898671794646)),
-      BusStop(id: 'p5', name: 'Santa Fé', position: LatLng(-8.331888692413065, -36.41357140284076)),
-      BusStop(id: 'p6', name: 'UABJ', position: LatLng(-8.326865277108523, -36.40530664721273)),
-      BusStop(id: 'p7', name: 'AEB', position: LatLng(-8.320094221176046, -36.39561876255546)),
+      BusStop(id: 'p5', name: 'Colegial', position: LatLng(-8.33377120753406, -36.41841024066295)),
+      BusStop(id: 'p6', name: 'Santa Fé', position: LatLng(-8.331888692413065, -36.41357140284076)),
+      BusStop(id: 'p7', name: 'UABJ', position: LatLng(-8.326865277108523, -36.40530664721273)),
+      BusStop(id: 'p8', name: 'AEB', position: LatLng(-8.320094221176046, -36.39561876255546)),
     ];
 
     if (_busStops.isNotEmpty) {
@@ -64,7 +65,7 @@ class _LocationDriverCohabState extends State<LocationDriverCohab> {
   }
 
   void _checkBusStops(LatLng busPosition) {
-    const double proximityThresholdMeters = 150.0;
+    const double proximityThresholdMeters = 100.0;
     for (var stop in _busStops) {
       if (!stop.passed) {
         double distance = Geolocator.distanceBetween(

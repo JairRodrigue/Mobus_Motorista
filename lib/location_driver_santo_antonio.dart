@@ -55,9 +55,10 @@ class _LocationDriverSantoAntonioState
       BusStop(id: 's2', name: 'Posto Petrovia', position: LatLng(-8.337454040898562, -36.43059339723894)),
       BusStop(id: 's3', name: 'Bradesco', position: LatLng(-8.337935253551777, -36.425932851649314)),
       BusStop(id: 's4', name: 'Fórum', position: LatLng(-8.33711239401202, -36.41898671794646)),
-      BusStop(id: 's5', name: 'Santa Fé', position: LatLng(-8.331888692413065, -36.41357140284076)),
-      BusStop(id: 's6', name: 'UABJ', position: LatLng(-8.326865277108523, -36.40530664721273)),
-      BusStop(id: 's7', name: 'AEB', position: LatLng(-8.320094221176046, -36.39561876255546)),
+      BusStop(id: 's5', name: 'Colegial', position: LatLng(-8.33377120753406, -36.41841024066295)),
+      BusStop(id: 's6', name: 'Santa Fé', position: LatLng(-8.331888692413065, -36.41357140284076)),
+      BusStop(id: 's7', name: 'UABJ', position: LatLng(-8.326865277108523, -36.40530664721273)),
+      BusStop(id: 's8', name: 'AEB', position: LatLng(-8.320094221176046, -36.39561876255546)),
     ];
 
     if (_busStops.isNotEmpty) {
@@ -66,7 +67,7 @@ class _LocationDriverSantoAntonioState
   }
 
   void _checkBusStops(LatLng busPosition) {
-    const double proximityThresholdMeters = 150.0;
+    const double proximityThresholdMeters = 100.0;
     for (var stop in _busStops) {
       if (!stop.passed) {
         double distance = Geolocator.distanceBetween(
