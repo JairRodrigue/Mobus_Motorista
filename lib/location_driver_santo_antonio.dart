@@ -23,12 +23,10 @@ class LocationDriverSantoAntonio extends StatefulWidget {
   const LocationDriverSantoAntonio({super.key});
 
   @override
-  State<LocationDriverSantoAntonio> createState() =>
-      _LocationDriverSantoAntonioState();
+  State<LocationDriverSantoAntonio> createState() => _LocationDriverSantoAntonioState();
 }
 
-class _LocationDriverSantoAntonioState
-    extends State<LocationDriverSantoAntonio> {
+class _LocationDriverSantoAntonioState extends State<LocationDriverSantoAntonio> {
   bool _showMap = false;
   LatLng _currentPosition = LatLng(-8.343481692464032, -36.42004505717594);
   final MapController _mapController = MapController();
@@ -40,6 +38,8 @@ class _LocationDriverSantoAntonioState
       FirebaseDatabase.instance.ref('onibus/santo_antonio/rota');
   final DatabaseReference _atualRef =
       FirebaseDatabase.instance.ref('onibus/santo_antonio/localizacao_atual');
+  final DatabaseReference _pontosRef =
+      FirebaseDatabase.instance.ref('onibus/santo_antonio/pontos_passados');
 
   DateTime? _lastSent;
 
@@ -67,7 +67,9 @@ class _LocationDriverSantoAntonioState
   }
 
   void _checkBusStops(LatLng busPosition) {
-    const double proximityThresholdMeters = 100.0;
+    const double proximityThresholdMeters = 75.0;
+    List<String> updatedPassedIds = [];
+
     for (var stop in _busStops) {
       if (!stop.passed) {
         double distance = Geolocator.distanceBetween(
@@ -77,12 +79,18 @@ class _LocationDriverSantoAntonioState
           stop.position.longitude,
         );
         if (distance <= proximityThresholdMeters) {
-          setState(() {
-            stop.passed = true;
-          });
+          stop.passed = true;
         }
       }
+      if (stop.passed) {
+        updatedPassedIds.add(stop.id);
+      }
     }
+
+    final Map<String, bool> passedMap = Map.fromIterable(updatedPassedIds, key: (item) => item, value: (item) => true);
+    _pontosRef.set(passedMap);
+
+    setState(() {});
   }
 
   @override
@@ -108,10 +116,6 @@ class _LocationDriverSantoAntonioState
       _currentPosition = LatLng(pos.latitude, pos.longitude);
     });
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _mapController.move(_currentPosition, 17);
-    });
-
     _updateLocation(pos);
 
     _positionStream = Geolocator.getPositionStream(
@@ -135,7 +139,10 @@ class _LocationDriverSantoAntonioState
     });
 
     _checkBusStops(newPos);
-    _mapController.move(newPos, 17);
+    
+    if (_showMap) {
+        _mapController.move(newPos, 17);
+    }
 
     await _atualRef.set({
       'lat': pos.latitude,
@@ -158,6 +165,8 @@ class _LocationDriverSantoAntonioState
     await _positionStream?.cancel();
     await _rotaRef.remove();
     await _atualRef.remove();
+    await _pontosRef.remove();
+    
     setState(() {
       _showMap = false;
       _routePoints.clear();
@@ -261,7 +270,7 @@ class _LocationDriverSantoAntonioState
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(
-                      Icons.bus_alert,
+                      Icons.directions_bus_rounded,
                       size: 100,
                       color: Colors.red.shade700,
                     ),
