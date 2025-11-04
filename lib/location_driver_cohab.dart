@@ -38,6 +38,8 @@ class _LocationDriverCohabState extends State<LocationDriverCohab> {
       FirebaseDatabase.instance.ref('onibus/cohab/rota');
   final DatabaseReference _atualRef =
       FirebaseDatabase.instance.ref('onibus/cohab/localizacao_atual');
+  final DatabaseReference _pontosRef =
+      FirebaseDatabase.instance.ref('onibus/cohab/pontos_passados');
 
   DateTime? _lastSent;
 
@@ -65,7 +67,9 @@ class _LocationDriverCohabState extends State<LocationDriverCohab> {
   }
 
   void _checkBusStops(LatLng busPosition) {
-    const double proximityThresholdMeters = 100.0;
+    const double proximityThresholdMeters = 75.0;
+    List<String> updatedPassedIds = [];
+
     for (var stop in _busStops) {
       if (!stop.passed) {
         double distance = Geolocator.distanceBetween(
@@ -75,12 +79,18 @@ class _LocationDriverCohabState extends State<LocationDriverCohab> {
           stop.position.longitude,
         );
         if (distance <= proximityThresholdMeters) {
-          setState(() {
-            stop.passed = true;
-          });
+          stop.passed = true;
         }
       }
+      if (stop.passed) {
+        updatedPassedIds.add(stop.id);
+      }
     }
+
+    final Map<String, bool> passedMap = Map.fromIterable(updatedPassedIds, key: (item) => item, value: (item) => true);
+    _pontosRef.set(passedMap);
+
+    setState(() {});
   }
 
   @override
@@ -106,10 +116,6 @@ class _LocationDriverCohabState extends State<LocationDriverCohab> {
       _currentPosition = LatLng(pos.latitude, pos.longitude);
     });
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _mapController.move(_currentPosition, 17);
-    });
-
     _updateLocation(pos);
 
     _positionStream = Geolocator.getPositionStream(
@@ -133,7 +139,10 @@ class _LocationDriverCohabState extends State<LocationDriverCohab> {
     });
 
     _checkBusStops(newPos);
-    _mapController.move(newPos, 17);
+    
+    if (_showMap) {
+        _mapController.move(newPos, 17);
+    }
 
     await _atualRef.set({
       'lat': pos.latitude,
@@ -156,6 +165,8 @@ class _LocationDriverCohabState extends State<LocationDriverCohab> {
     await _positionStream?.cancel();
     await _rotaRef.remove();
     await _atualRef.remove();
+    await _pontosRef.remove();
+    
     setState(() {
       _showMap = false;
       _routePoints.clear();
