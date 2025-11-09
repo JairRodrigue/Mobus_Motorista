@@ -34,12 +34,18 @@ class _LocationDriverCohabState extends State<LocationDriverCohab> {
   List<LatLng> _routePoints = [];
   List<BusStop> _busStops = [];
 
-  final DatabaseReference _rotaRef =
-      FirebaseDatabase.instance.ref('onibus/cohab/rota');
-  final DatabaseReference _atualRef =
-      FirebaseDatabase.instance.ref('onibus/cohab/localizacao_atual');
-  final DatabaseReference _pontosRef =
-      FirebaseDatabase.instance.ref('onibus/cohab/pontos_passados');
+  final DatabaseReference _rotaRef = FirebaseDatabase.instance.ref(
+    'onibus/cohab/rota',
+  );
+  final DatabaseReference _atualRef = FirebaseDatabase.instance.ref(
+    'onibus/cohab/localizacao_atual',
+  );
+  final DatabaseReference _pontosRef = FirebaseDatabase.instance.ref(
+    'onibus/cohab/pontos_passados',
+  );
+  final DatabaseReference _statusRef = FirebaseDatabase.instance.ref(
+    'onibus/cohab/status',
+  );
 
   DateTime? _lastSent;
 
@@ -51,14 +57,46 @@ class _LocationDriverCohabState extends State<LocationDriverCohab> {
 
   void _loadBusStops() {
     _busStops = [
-      BusStop(id: 'p1', name: 'Entrada da BR', position: LatLng(-8.348653123556376, -36.409243068163)),
-      BusStop(id: 'p2', name: 'Praça das crianças', position: LatLng(-8.343889377713843, -36.413837818197614)),
-      BusStop(id: 'p3', name: 'Sebastião Cabral', position: LatLng(-8.34210767354571, -36.41681422352121)),
-      BusStop(id: 'p4', name: 'Fórum', position: LatLng(-8.33711239401202, -36.41898671794646)),
-      BusStop(id: 'p5', name: 'Colegial', position: LatLng(-8.33377120753406, -36.41841024066295)),
-      BusStop(id: 'p6', name: 'Santa Fé', position: LatLng(-8.331888692413065, -36.41357140284076)),
-      BusStop(id: 'p7', name: 'UABJ', position: LatLng(-8.326865277108523, -36.40530664721273)),
-      BusStop(id: 'p8', name: 'AEB', position: LatLng(-8.320094221176046, -36.39561876255546)),
+      BusStop(
+        id: 'p1',
+        name: 'Entrada da BR',
+        position: LatLng(-8.348653123556376, -36.409243068163),
+      ),
+      BusStop(
+        id: 'p2',
+        name: 'Praça das crianças',
+        position: LatLng(-8.343889377713843, -36.413837818197614),
+      ),
+      BusStop(
+        id: 'p3',
+        name: 'Sebastião Cabral',
+        position: LatLng(-8.34210767354571, -36.41681422352121),
+      ),
+      BusStop(
+        id: 'p4',
+        name: 'Fórum',
+        position: LatLng(-8.33711239401202, -36.41898671794646),
+      ),
+      BusStop(
+        id: 'p5',
+        name: 'Colegial',
+        position: LatLng(-8.33377120753406, -36.41841024066295),
+      ),
+      BusStop(
+        id: 'p6',
+        name: 'Santa Fé',
+        position: LatLng(-8.331888692413065, -36.41357140284076),
+      ),
+      BusStop(
+        id: 'p7',
+        name: 'UABJ',
+        position: LatLng(-8.326865277108523, -36.40530664721273),
+      ),
+      BusStop(
+        id: 'p8',
+        name: 'AEB',
+        position: LatLng(-8.320094221176046, -36.39561876255546),
+      ),
     ];
 
     if (_busStops.isNotEmpty) {
@@ -87,7 +125,11 @@ class _LocationDriverCohabState extends State<LocationDriverCohab> {
       }
     }
 
-    final Map<String, bool> passedMap = Map.fromIterable(updatedPassedIds, key: (item) => item, value: (item) => true);
+    final Map<String, bool> passedMap = Map.fromIterable(
+      updatedPassedIds,
+      key: (item) => item,
+      value: (item) => true,
+    );
     _pontosRef.set(passedMap);
 
     setState(() {});
@@ -118,14 +160,18 @@ class _LocationDriverCohabState extends State<LocationDriverCohab> {
 
     _updateLocation(pos);
 
-    _positionStream = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.bestForNavigation,
-        distanceFilter: 0,
-      ),
-    ).listen((Position pos) {
-      _updateLocation(pos);
-    });
+    _positionStream =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.bestForNavigation,
+            distanceFilter: 0,
+          ),
+        ).listen((Position pos) {
+          _updateLocation(pos);
+        });
+
+    // Quando o motorista começa a compartilhar, marca como não finalizada
+    await _statusRef.set({'finalizada': false});
   }
 
   Future<void> _updateLocation(Position pos) async {
@@ -139,9 +185,9 @@ class _LocationDriverCohabState extends State<LocationDriverCohab> {
     });
 
     _checkBusStops(newPos);
-    
+
     if (_showMap) {
-        _mapController.move(newPos, 17);
+      _mapController.move(newPos, 17);
     }
 
     await _atualRef.set({
@@ -161,12 +207,18 @@ class _LocationDriverCohabState extends State<LocationDriverCohab> {
     }
   }
 
+  // ✅ ALTERADO: envia sinal 'finalizada: true' pro Firebase
   Future<void> _finishRoute() async {
+    await _statusRef.set({
+      'finalizada': true,
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+
     await _positionStream?.cancel();
     await _rotaRef.remove();
     await _atualRef.remove();
     await _pontosRef.remove();
-    
+
     setState(() {
       _showMap = false;
       _routePoints.clear();
@@ -174,10 +226,11 @@ class _LocationDriverCohabState extends State<LocationDriverCohab> {
         stop.passed = false;
       }
     });
+
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Rota encerrada!"),
+          content: Text("Rota encerrada e status enviado!"),
           backgroundColor: Colors.green,
         ),
       );
@@ -213,8 +266,9 @@ class _LocationDriverCohabState extends State<LocationDriverCohab> {
                 options: MapOptions(
                   initialCenter: _currentPosition,
                   initialZoom: 16,
-                  interactionOptions:
-                      const InteractionOptions(flags: InteractiveFlag.all),
+                  interactionOptions: const InteractionOptions(
+                    flags: InteractiveFlag.all,
+                  ),
                 ),
                 children: [
                   TileLayer(

@@ -23,10 +23,12 @@ class LocationDriverSantoAntonio extends StatefulWidget {
   const LocationDriverSantoAntonio({super.key});
 
   @override
-  State<LocationDriverSantoAntonio> createState() => _LocationDriverSantoAntonioState();
+  State<LocationDriverSantoAntonio> createState() =>
+      _LocationDriverSantoAntonioState();
 }
 
-class _LocationDriverSantoAntonioState extends State<LocationDriverSantoAntonio> {
+class _LocationDriverSantoAntonioState
+    extends State<LocationDriverSantoAntonio> {
   bool _showMap = false;
   LatLng _currentPosition = LatLng(-8.343481692464032, -36.42004505717594);
   final MapController _mapController = MapController();
@@ -34,12 +36,18 @@ class _LocationDriverSantoAntonioState extends State<LocationDriverSantoAntonio>
   List<LatLng> _routePoints = [];
   List<BusStop> _busStops = [];
 
-  final DatabaseReference _rotaRef =
-      FirebaseDatabase.instance.ref('onibus/santo_antonio/rota');
-  final DatabaseReference _atualRef =
-      FirebaseDatabase.instance.ref('onibus/santo_antonio/localizacao_atual');
-  final DatabaseReference _pontosRef =
-      FirebaseDatabase.instance.ref('onibus/santo_antonio/pontos_passados');
+  final DatabaseReference _rotaRef = FirebaseDatabase.instance.ref(
+    'onibus/santo_antonio/rota',
+  );
+  final DatabaseReference _atualRef = FirebaseDatabase.instance.ref(
+    'onibus/santo_antonio/localizacao_atual',
+  );
+  final DatabaseReference _pontosRef = FirebaseDatabase.instance.ref(
+    'onibus/santo_antonio/pontos_passados',
+  );
+  final DatabaseReference _statusRef = FirebaseDatabase.instance.ref(
+    'onibus/santo_antonio/status',
+  );
 
   DateTime? _lastSent;
 
@@ -51,14 +59,46 @@ class _LocationDriverSantoAntonioState extends State<LocationDriverSantoAntonio>
 
   void _loadBusStops() {
     _busStops = [
-      BusStop(id: 's1', name: 'Erem João Monteiro', position: LatLng(-8.339067752350099, -36.43255993416365)),
-      BusStop(id: 's2', name: 'Posto Petrovia', position: LatLng(-8.337454040898562, -36.43059339723894)),
-      BusStop(id: 's3', name: 'Bradesco', position: LatLng(-8.337935253551777, -36.425932851649314)),
-      BusStop(id: 's4', name: 'Fórum', position: LatLng(-8.33711239401202, -36.41898671794646)),
-      BusStop(id: 's5', name: 'Colegial', position: LatLng(-8.33377120753406, -36.41841024066295)),
-      BusStop(id: 's6', name: 'Santa Fé', position: LatLng(-8.331888692413065, -36.41357140284076)),
-      BusStop(id: 's7', name: 'UABJ', position: LatLng(-8.326865277108523, -36.40530664721273)),
-      BusStop(id: 's8', name: 'AEB', position: LatLng(-8.320094221176046, -36.39561876255546)),
+      BusStop(
+        id: 's1',
+        name: 'Erem João Monteiro',
+        position: LatLng(-8.339067752350099, -36.43255993416365),
+      ),
+      BusStop(
+        id: 's2',
+        name: 'Posto Petrovia',
+        position: LatLng(-8.337454040898562, -36.43059339723894),
+      ),
+      BusStop(
+        id: 's3',
+        name: 'Bradesco',
+        position: LatLng(-8.337935253551777, -36.425932851649314),
+      ),
+      BusStop(
+        id: 's4',
+        name: 'Fórum',
+        position: LatLng(-8.33711239401202, -36.41898671794646),
+      ),
+      BusStop(
+        id: 's5',
+        name: 'Colegial',
+        position: LatLng(-8.33377120753406, -36.41841024066295),
+      ),
+      BusStop(
+        id: 's6',
+        name: 'Santa Fé',
+        position: LatLng(-8.331888692413065, -36.41357140284076),
+      ),
+      BusStop(
+        id: 's7',
+        name: 'UABJ',
+        position: LatLng(-8.326865277108523, -36.40530664721273),
+      ),
+      BusStop(
+        id: 's8',
+        name: 'AEB',
+        position: LatLng(-8.320094221176046, -36.39561876255546),
+      ),
     ];
 
     if (_busStops.isNotEmpty) {
@@ -87,7 +127,11 @@ class _LocationDriverSantoAntonioState extends State<LocationDriverSantoAntonio>
       }
     }
 
-    final Map<String, bool> passedMap = Map.fromIterable(updatedPassedIds, key: (item) => item, value: (item) => true);
+    final Map<String, bool> passedMap = Map.fromIterable(
+      updatedPassedIds,
+      key: (item) => item,
+      value: (item) => true,
+    );
     _pontosRef.set(passedMap);
 
     setState(() {});
@@ -118,14 +162,18 @@ class _LocationDriverSantoAntonioState extends State<LocationDriverSantoAntonio>
 
     _updateLocation(pos);
 
-    _positionStream = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.bestForNavigation,
-        distanceFilter: 0,
-      ),
-    ).listen((Position pos) {
-      _updateLocation(pos);
-    });
+    _positionStream =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.bestForNavigation,
+            distanceFilter: 0,
+          ),
+        ).listen((Position pos) {
+          _updateLocation(pos);
+        });
+
+    // 🟢 Quando começa a compartilhar, marca como não finalizada
+    await _statusRef.set({'finalizada': false});
   }
 
   Future<void> _updateLocation(Position pos) async {
@@ -139,9 +187,9 @@ class _LocationDriverSantoAntonioState extends State<LocationDriverSantoAntonio>
     });
 
     _checkBusStops(newPos);
-    
+
     if (_showMap) {
-        _mapController.move(newPos, 17);
+      _mapController.move(newPos, 17);
     }
 
     await _atualRef.set({
@@ -161,12 +209,18 @@ class _LocationDriverSantoAntonioState extends State<LocationDriverSantoAntonio>
     }
   }
 
+  // 🟥 Quando o motorista aperta "Chegou ao destino"
   Future<void> _finishRoute() async {
+    await _statusRef.set({
+      'finalizada': true,
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+
     await _positionStream?.cancel();
     await _rotaRef.remove();
     await _atualRef.remove();
     await _pontosRef.remove();
-    
+
     setState(() {
       _showMap = false;
       _routePoints.clear();
@@ -174,10 +228,11 @@ class _LocationDriverSantoAntonioState extends State<LocationDriverSantoAntonio>
         stop.passed = false;
       }
     });
+
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Rota encerrada!"),
+          content: Text("Rota encerrada e status enviado!"),
           backgroundColor: Colors.green,
         ),
       );
@@ -213,8 +268,9 @@ class _LocationDriverSantoAntonioState extends State<LocationDriverSantoAntonio>
                 options: MapOptions(
                   initialCenter: _currentPosition,
                   initialZoom: 16,
-                  interactionOptions:
-                      const InteractionOptions(flags: InteractiveFlag.all),
+                  interactionOptions: const InteractionOptions(
+                    flags: InteractiveFlag.all,
+                  ),
                 ),
                 children: [
                   TileLayer(
