@@ -1,11 +1,10 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:http/http.dart' as http;
 
 class BusStop {
   final String id;
@@ -36,13 +35,10 @@ class _LocationDriverSantoAntonioState
   final MapController _mapController = MapController();
   StreamSubscription<Position>? _positionStream;
 
-  // rota planejada (pontos retornados pelo OSRM)
-  List<LatLng> _plannedRoutePoints = [];
+  final List<LatLng> _routeHistory = [];
 
-  // pontos que o ônibus passa
   final List<BusStop> _busStops = [];
 
-  // Firebase refs (Santo Antônio)
   final DatabaseReference _rotaRef =
       FirebaseDatabase.instance.ref('onibus/santo_antonio/rota');
   final DatabaseReference _atualRef = FirebaseDatabase.instance
@@ -51,31 +47,17 @@ class _LocationDriverSantoAntonioState
       FirebaseDatabase.instance.ref('onibus/santo_antonio/pontos_passados');
   final DatabaseReference _statusRef =
       FirebaseDatabase.instance.ref('onibus/santo_antonio/status');
-  final DatabaseReference _estimativasRef =
-      FirebaseDatabase.instance.ref('onibus/santo_antonio/estimativas');
 
   DateTime? _lastSent;
-
-  // estimativas e próximos
-  double? _distanciaProxima_m;
-  double? _tempoProxima_s;
-  double? _distanciaTotal_m;
-  double? _tempoTotal_s;
-  String? _proximaParadaId;
-  String _speedLabel = '28 km/h';
-
-  // velocidade usada para estimativas
-  static const double _speedKmH = 28.0;
-  static final double _speedMps = _speedKmH * 1000.0 / 3600.0;
 
   @override
   void initState() {
     super.initState();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _loadBusStops();
   }
 
   void _loadBusStops() {
-    // Defina as paradas específicas do Santo Antônio (mantive as que você enviou)
     _busStops.clear();
     _busStops.addAll([
       BusStop(
@@ -123,210 +105,6 @@ class _LocationDriverSantoAntonioState
     if (_busStops.isNotEmpty) {
       _currentPosition = _busStops.first.position;
     }
-
-    // constrói rota OSRM inicialmente
-    _buildSingleOsrmRoute();
-  }
-
-  String _getProximaParadaNome() {
-    if (_proximaParadaId == null || _proximaParadaId!.isEmpty) {
-      return 'Nenhuma';
-    }
-
-    final stop = _busStops.firstWhere(
-      (s) => s.id == _proximaParadaId,
-      orElse: () =>
-          BusStop(id: '', name: 'Nenhuma', position: const LatLng(0, 0)),
-    );
-
-    return stop.name;
-  }
-
-  Future<void> _buildSingleOsrmRoute() async {
-    _plannedRoutePoints = [];
-
-    List<LatLng> coordsForOsrm = [];
-    coordsForOsrm.add(_currentPosition);
-
-    for (final stop in _busStops) {
-      if (!stop.passed) {
-        coordsForOsrm.add(stop.position);
-      }
-    }
-
-    if (coordsForOsrm.length < 2) {
-      if (mounted) setState(() {});
-      await _calculateEstimates();
-      return;
-    }
-
-    final coordsString =
-        coordsForOsrm.map((p) => '${p.longitude},${p.latitude}').join(';');
-
-    final url =
-        'https://router.project-osrm.org/route/v1/driving/$coordsString?overview=full&geometries=geojson&steps=false';
-
-    try {
-      final resp =
-          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
-      if (resp.statusCode != 200) {
-        if (mounted) setState(() {});
-        await _calculateEstimates();
-        return;
-      }
-
-      final Map<String, dynamic> data = json.decode(resp.body);
-      if (data['routes'] == null || (data['routes'] as List).isEmpty) {
-        if (mounted) setState(() {});
-        await _calculateEstimates();
-        return;
-      }
-
-      final geometry = data['routes'][0]['geometry'];
-      if (geometry == null || geometry['coordinates'] == null) {
-        if (mounted) setState(() {});
-        await _calculateEstimates();
-        return;
-      }
-
-      final List coords = geometry['coordinates'];
-      final List<LatLng> points = coords.map<LatLng>((c) {
-        final double lng = (c[0] as num).toDouble();
-        final double lat = (c[1] as num).toDouble();
-        return LatLng(lat, lng);
-      }).toList();
-
-      _plannedRoutePoints = points;
-      if (mounted) setState(() {});
-
-      await _calculateEstimates();
-    } catch (e) {
-      // falha no OSRM -> recalcula estimativas sem polilinha
-      if (mounted) setState(() {});
-      await _calculateEstimates();
-    }
-  }
-
-  Future<void> _calculateEstimates() async {
-    _distanciaProxima_m = null;
-    _tempoProxima_s = null;
-    _distanciaTotal_m = null;
-    _tempoTotal_s = null;
-    _proximaParadaId = null;
-
-    if (_plannedRoutePoints.isEmpty) {
-      await _writeEstimatesToFirebase();
-      if (mounted) setState(() {});
-      return;
-    }
-
-    int indexNearestToCurrent =
-        _findNearestIndexOnPolyline(_currentPosition, _plannedRoutePoints);
-
-    BusStop? nextStop;
-    for (var stop in _busStops) {
-      if (!stop.passed) {
-        nextStop = stop;
-        break;
-      }
-    }
-
-    double totalRemaining = 0.0;
-    for (int i = indexNearestToCurrent;
-        i < _plannedRoutePoints.length - 1;
-        i++) {
-      final a = _plannedRoutePoints[i];
-      final b = _plannedRoutePoints[i + 1];
-      totalRemaining += Geolocator.distanceBetween(
-          a.latitude, a.longitude, b.latitude, b.longitude);
-    }
-
-    _distanciaTotal_m = totalRemaining;
-    _tempoTotal_s = totalRemaining / _speedMps;
-
-    if (nextStop != null) {
-      _proximaParadaId = nextStop.id;
-      int indexNearestToStop = _findNearestIndexOnPolyline(
-          nextStop.position, _plannedRoutePoints);
-
-      double distToNext = 0.0;
-      if (indexNearestToStop <= indexNearestToCurrent) {
-        distToNext = Geolocator.distanceBetween(
-          _currentPosition.latitude,
-          _currentPosition.longitude,
-          nextStop.position.latitude,
-          nextStop.position.longitude,
-        );
-      } else {
-        for (int i = indexNearestToCurrent; i < indexNearestToStop; i++) {
-          final a = _plannedRoutePoints[i];
-          final b = _plannedRoutePoints[i + 1];
-          distToNext += Geolocator.distanceBetween(
-              a.latitude, a.longitude, b.latitude, b.longitude);
-        }
-
-        final nearestPointToStop = _plannedRoutePoints[indexNearestToStop];
-        final extra = Geolocator.distanceBetween(
-            nearestPointToStop.latitude,
-            nearestPointToStop.longitude,
-            nextStop.position.latitude,
-            nextStop.position.longitude);
-        if (extra < 50.0) distToNext += extra;
-      }
-
-      _distanciaProxima_m = distToNext;
-      _tempoProxima_s = distToNext / _speedMps;
-    } else {
-      _distanciaProxima_m = 0.0;
-      _tempoProxima_s = 0.0;
-    }
-
-    await _writeEstimatesToFirebase();
-
-    if (mounted) setState(() {});
-  }
-
-  int _findNearestIndexOnPolyline(LatLng target, List<LatLng> poly) {
-    int bestIndex = 0;
-    double bestDist = double.infinity;
-    for (int i = 0; i < poly.length; i++) {
-      final p = poly[i];
-      final d = Geolocator.distanceBetween(
-          target.latitude, target.longitude, p.latitude, p.longitude);
-      if (d < bestDist) {
-        bestDist = d;
-        bestIndex = i;
-      }
-    }
-    return bestIndex;
-  }
-
-  Future<void> _writeEstimatesToFirebase() async {
-    final now = DateTime.now().toIso8601String();
-
-    final Map<String, dynamic> payload = {
-      'distancia_proxima_m': _distanciaProxima_m ?? 0.0,
-      'distancia_proxima_km':
-          _distanciaProxima_m != null ? (_distanciaProxima_m! / 1000.0) : 0.0,
-      'tempo_proxima_s': _tempoProxima_s ?? 0.0,
-      'tempo_proxima_min':
-          _tempoProxima_s != null ? (_tempoProxima_s! / 60.0) : 0.0,
-      'proxima_parada_id': _proximaParadaId ?? '',
-      'distancia_total_m': _distanciaTotal_m ?? 0.0,
-      'distancia_total_km':
-          _distanciaTotal_m != null ? (_distanciaTotal_m! / 1000.0) : 0.0,
-      'tempo_total_s': _tempoTotal_s ?? 0.0,
-      'tempo_total_min':
-          _tempoTotal_s != null ? (_tempoTotal_s! / 60.0) : 0.0,
-      'speed_kmh': _speedKmH,
-      'updated_at': now,
-    };
-
-    try {
-      await _estimativasRef.set(payload);
-    } catch (_) {
-      // ignore erros de escrita
-    }
   }
 
   void _checkBusStops(LatLng busPosition) {
@@ -353,14 +131,12 @@ class _LocationDriverSantoAntonioState
 
     _pontosRef.set(passedMap);
 
-    // Recalcula rota/estimativas ao marcar paradas
-    _buildSingleOsrmRoute();
-
     setState(() {});
   }
 
   @override
   void dispose() {
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _positionStream?.cancel();
     super.dispose();
   }
@@ -379,16 +155,15 @@ class _LocationDriverSantoAntonioState
     setState(() {
       _showMap = true;
       _currentPosition = LatLng(pos.latitude, pos.longitude);
+      _routeHistory.clear();
+      _routeHistory.add(_currentPosition);
     });
-
-    // constrói rota inicializada com a posição atual
-    await _buildSingleOsrmRoute();
 
     _updateLocation(pos);
 
     _positionStream = Geolocator.getPositionStream(
-      locationSettings:
-          const LocationSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: 0),
+      locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.bestForNavigation, distanceFilter: 0),
     ).listen((Position pos) async {
       await _updateLocation(pos);
     });
@@ -401,12 +176,12 @@ class _LocationDriverSantoAntonioState
 
     setState(() {
       _currentPosition = newPos;
+      if (_showMap) {
+        _routeHistory.add(newPos);
+      }
     });
 
     _checkBusStops(newPos);
-
-    // atualiza rota planejada com OSRM (reconstrução leve)
-    await _buildSingleOsrmRoute();
 
     if (_showMap) {
       _mapController.move(newPos, 17);
@@ -430,63 +205,34 @@ class _LocationDriverSantoAntonioState
   }
 
   Future<void> _finishRoute() async {
-    await _statusRef.set({
-      'finalizada': true,
-      'timestamp': DateTime.now().toIso8601String(),
-    });
+    try {
+      await _statusRef.set({
+        'finalizada': true,
+        'timestamp': DateTime.now().toIso8601String(),
+      });
+      _rotaRef.remove();
+      _atualRef.remove();
+      _pontosRef.remove();
+    } catch (e) {}
 
     await _positionStream?.cancel();
-    await _rotaRef.remove();
-    await _atualRef.remove();
-    await _pontosRef.remove();
-
-    setState(() {
-      _showMap = false;
-      _plannedRoutePoints.clear();
-      for (var stop in _busStops) {
-        stop.passed = false;
-      }
-    });
 
     if (mounted) {
+      setState(() {
+        _showMap = false;
+        _routeHistory.clear();
+        for (var stop in _busStops) {
+          stop.passed = false;
+        }
+      });
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Rota encerrada e status enviado!"),
           backgroundColor: Colors.green,
         ),
       );
-      Navigator.pop(context);
-    }
-  }
-
-  String _formatMeters(double? meters) {
-    if (meters == null) return '--';
-    if (meters >= 1000) return '${(meters / 1000).toStringAsFixed(1)} km';
-    return '${meters.toStringAsFixed(0)} m';
-  }
-
-  String _formatSeconds(double? seconds) {
-    if (seconds == null) return '--';
-    final minutes = (seconds / 60).round();
-    if (minutes <= 0) return '<1 min';
-    return '$minutes min';
-  }
-
-  String _formatSecondsHM(double? seconds) {
-    if (seconds == null) return '--';
-
-    int totalSeconds = seconds.round();
-    if (totalSeconds <= 0) return '<1 min';
-
-    int hours = totalSeconds ~/ 3600;
-    int minutes = (totalSeconds % 3600) ~/ 60;
-
-    if (hours > 0 && minutes > 0) {
-      return '${hours}h ${minutes}min';
-    } else if (hours > 0) {
-      return '${hours}h';
-    } else {
-      return '${minutes}min';
+      Navigator.of(context).pop();
     }
   }
 
@@ -506,7 +252,7 @@ class _LocationDriverSantoAntonioState
             if (_showMap) {
               _finishRoute();
             } else {
-              Navigator.pop(context);
+              Navigator.of(context).pop();
             }
           },
         ),
@@ -530,18 +276,15 @@ class _LocationDriverSantoAntonioState
                             "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
                         userAgentPackageName: 'com.example.mobus',
                       ),
-
-                      if (_plannedRoutePoints.length >= 2)
-                        PolylineLayer(
-                          polylines: [
-                            Polyline(
-                              points: _plannedRoutePoints,
-                              strokeWidth: 5.0,
-                              color: Colors.blue,
-                            ),
-                          ],
-                        ),
-
+                      PolylineLayer(
+                        polylines: [
+                          Polyline(
+                            points: _routeHistory,
+                            strokeWidth: 5.0,
+                            color: Colors.blue,
+                          ),
+                        ],
+                      ),
                       MarkerLayer(
                         markers: [
                           Marker(
@@ -620,86 +363,28 @@ class _LocationDriverSantoAntonioState
                     ),
                   ),
           ),
-
           if (_showMap)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: ElevatedButton.icon(
-                onPressed: _finishRoute,
-                icon: const Icon(Icons.flag, color: Colors.white),
-                label: const Text(
-                  "Chegou ao destino",
-                  style: TextStyle(color: Colors.white, fontSize: 18),
+            SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: ElevatedButton.icon(
+                  onPressed: _finishRoute,
+                  icon: const Icon(Icons.flag, color: Colors.white),
+                  label: const Text(
+                    "Chegou ao destino",
+                    style: TextStyle(color: Colors.white, fontSize: 18),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red.shade700,
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 12, horizontal: 25),
+                  ),
                 ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red.shade700,
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 12, horizontal: 25),
-                ),
-              ),
-            ),
-
-          if (_showMap)
-            Container(
-              width: double.infinity,
-              color: Colors.white,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Velocidade média usada: $_speedLabel',
-                      style:
-                          const TextStyle(fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-
-                  Text(
-                    'Próxima parada: ${_getProximaParadaNome()}',
-                    style: const TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-
-                  const SizedBox(height: 6),
-
-                  Row(
-                    children: [
-                      Expanded(
-                          child: Text(
-                              'Distância até próxima: ${_formatMeters(_distanciaProxima_m)}')),
-                      const SizedBox(width: 12),
-                      Expanded(
-                          child: Text(
-                              'Tempo estimado: ${_formatSecondsHM(_tempoProxima_s)}')),
-                    ],
-                  ),
-
-                  const SizedBox(height: 8),
-
-                  Row(
-                    children: [
-                      Expanded(
-                          child: Text(
-                              'Distância total restante: ${_formatMeters(_distanciaTotal_m)}')),
-                      const SizedBox(width: 12),
-                      Expanded(
-                          child: Text(
-                              'Tempo total estimado: ${_formatSecondsHM(_tempoTotal_s)}')),
-                    ],
-                  ),
-
-                  const SizedBox(height: 6),
-
-                  Text(
-                    'Última atualização: ${DateTime.now().toLocal().toString().split('.')[0]}',
-                    style: const TextStyle(
-                        fontSize: 12, color: Colors.black54),
-                  ),
-                ],
               ),
             ),
         ],
       ),
-      
     );
   }
 }
